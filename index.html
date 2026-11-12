@@ -152,7 +152,7 @@
         <input type="checkbox" id="use_generic_term" class="h-5 w-5 rounded border-[#648381]/30">
         <div>
           <span class="block text-sm font-bold text-[#575761]">ใช้คำว่า "พร้อมด้วยเจ้าหน้าที่"</span>
-          <span class="block text-[10px] text-[#648381]">*ระบบติ๊กอัตโนมัติเมื่อ > 3 คน</span>
+          <span class="block text-[10px] text-[#648381]">*ระบบติ๊กอัตโนมัติเมื่อ > 3 คน หากไม่ติ๊ก ข่าวจะระบุชื่อและตำแหน่งของทุกคนที่เลือก</span>
         </div>
       </label>
     </div>
@@ -167,7 +167,7 @@
 (⚠️ หากเลือก เข้าร่วม/กล่าวรายงาน/นำทีม โปรดระบุชื่อประธานในพิธีด้วย)" class="w-full p-4 border border-[#8acb88]/30 rounded-2xl focus:ring-2 focus:ring-[#ffbf46] outline-none text-[#575761] bg-[#f9fdf9] placeholder:text-[#648381]/50 shadow-inner mb-4"></textarea>
       <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-[#ffbf46]/50 rounded-2xl cursor-pointer bg-[#ffbf46]/5 hover:bg-[#ffbf46]/10 hover:border-[#ffbf46] transition text-[#ffbf46]">
         <svg class="w-8 h-8 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-        <p class="text-sm font-medium">เพิ่มรูปภาพประกอบ</p>
+        <p id="image_label" class="text-sm font-medium">เพิ่มรูปภาพประกอบ (0/15 รูป)</p>
         <input type="file" id="images" multiple accept="image/*" class="hidden">
       </label>
       <div id="image_preview" class="grid grid-cols-3 gap-3 mt-4"></div>
@@ -197,6 +197,8 @@ const SUPABASE_URL = 'https://ngreqaszduphwftwswdj.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ncmVxYXN6ZHVwaHdmdHdzd2RqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAxMTcyNTMsImV4cCI6MjA3NTY5MzI1M30.balzxiWXum4lnl6dCrNzSoF02tRfmG19rEqMnHSynwk';
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQA5WsMKHm9yiBhlLYyBPy4R71gfSzdQCpjzdg_wLL97RaWjQGfCzPie84oBFvqR3cdRWMuFVyVpu0f/pub?gid=0&single=true&output=csv';
 
+const MAX_IMAGES = 15;   // จำนวนรูปสูงสุดต่อข่าว
+
 const GROUPS = ["กลุ่มยุทธศาสตร์และสารสนเทศ","กลุ่มส่งเสริมและพัฒนาการผลิต","กลุ่มส่งเสริมและพัฒนาเกษตรกร","กลุ่มอารักขาพืช","ฝ่ายบริหารทั่วไป"];
 const DISTRICTS = ["เมืองกาญจนบุรี","ไทรโยค","บ่อพลอย","ศรีสวัสดิ์","ท่ามะกา","ท่าม่วง","ทองผาภูมิ","สังขละบุรี","พนมทวน","เลาขวัญ","ด่านมะขามเตี้ย","หนองปรือ","ห้วยกระเจา"];
 const MONTHS_TH = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
@@ -209,6 +211,7 @@ const KASET_OPTIONS = [
 let OFFICERS = [];
 let files = [];
 let userId = "guest";
+let imageBusy = false;
 const selectedOfficersMap = new Map();
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
@@ -381,9 +384,10 @@ $('source_type').addEventListener('change', (e) => {
   const isDist = e.target.value === 'district';
   $('district_container').className = isDist ? 'animate-fade-in' : 'hidden';
   $('group_container').className = isDist ? 'hidden' : 'animate-fade-in';
+  if (isDist) $('head_officer_select').value = '';   // รายชื่อหัวหน้าเป็นของกลุ่มในจังหวัด ไม่ใช้กับข่าวของอำเภอ
 });
 
-// ================= รูปภาพ =================
+// ================= รูปภาพ (สูงสุด MAX_IMAGES รูป) =================
 function resizeImage(file, maxWidth, quality) {
   return new Promise((resolve, reject) => {
     if (!file.type.match(/image.*/)) return reject(new Error('Not an image'));
@@ -404,8 +408,13 @@ function resizeImage(file, maxWidth, quality) {
       image.onerror = () => reject(new Error('Image load error'));
       image.src = ev.target.result;
     };
+    reader.onerror = () => reject(new Error('File read error'));
     reader.readAsDataURL(file);
   });
+}
+
+function updateImageLabel() {
+  $('image_label').textContent = `เพิ่มรูปภาพประกอบ (${files.length}/${MAX_IMAGES} รูป)`;
 }
 
 function renderPreviews() {
@@ -415,6 +424,7 @@ function renderPreviews() {
     const wrap = document.createElement('div');
     wrap.className = 'relative animate-fade-in';
     const img = document.createElement('img');
+    img.onload = () => URL.revokeObjectURL(img.src);     // คืนหน่วยความจำหลังแสดงรูปแล้ว
     img.src = URL.createObjectURL(f);
     img.className = 'w-full h-24 object-cover rounded-xl border border-[#648381]/20 shadow-sm';
     const btn = document.createElement('button');
@@ -424,21 +434,40 @@ function renderPreviews() {
     wrap.append(img, btn);
     pv.appendChild(wrap);
   });
+  updateImageLabel();
 }
 
-$('images').addEventListener('change', async (e) => {
-  const newFiles = Array.from(e.target.files);
-  e.target.value = '';
-  const pv = $('image_preview');
-  const note = document.createElement('div');
-  note.className = 'text-xs text-[#648381] col-span-3 text-center py-4 bg-[#e4fde1] rounded-xl animate-pulse border border-[#8acb88]/30';
-  note.textContent = '⚡ กำลังบีบอัดรูปภาพ...';
-  pv.appendChild(note);
-  for (const file of newFiles) {
-    try { files.push(await resizeImage(file, 1280, 0.8)); }
-    catch (err) { console.error('Resize error:', err); }
+// ครบจำนวนแล้วไม่ให้เปิดหน้าเลือกรูปอีก
+$('images').addEventListener('click', (e) => {
+  if (imageBusy) { e.preventDefault(); return; }
+  if (files.length >= MAX_IMAGES) {
+    e.preventDefault();
+    alert(`แนบรูปได้สูงสุด ${MAX_IMAGES} รูป หากต้องการเปลี่ยนรูป กรุณากดปุ่ม ✕ ลบรูปเดิมก่อน`);
   }
-  renderPreviews();
+});
+
+$('images').addEventListener('change', async (e) => {
+  const picked = Array.from(e.target.files);
+  e.target.value = '';
+  if (imageBusy || picked.length === 0) return;
+
+  const remaining = MAX_IMAGES - files.length;
+  if (remaining <= 0) return alert(`แนบรูปได้สูงสุด ${MAX_IMAGES} รูป`);
+  if (picked.length > remaining) {
+    alert(`แนบรูปได้สูงสุด ${MAX_IMAGES} รูป ระบบจะใช้เพียง ${remaining} รูปแรกที่เลือก`);
+  }
+
+  imageBusy = true;
+  $('image_label').textContent = '⚡ กำลังบีบอัดรูปภาพ...';
+  try {
+    for (const file of picked.slice(0, remaining)) {
+      try { files.push(await resizeImage(file, 1280, 0.8)); }
+      catch (err) { console.error('Resize error:', err); }
+    }
+  } finally {
+    imageBusy = false;
+    renderPreviews();
+  }
 });
 
 // ================= SUBMIT =================
@@ -446,9 +475,11 @@ $('newsForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = $('submit_btn'), btnText = $('btn_text');
 
+  if (imageBusy) return alert('⏳ ระบบกำลังบีบอัดรูปภาพ กรุณารอสักครู่');
   const ad = getActivityDate();
   if (!ad) return alert('📅 วันที่ไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง');
   if (files.length === 0) return alert('📸 กรุณาใส่รูปภาพประกอบอย่างน้อย 1 รูปครับ');
+  if (files.length > MAX_IMAGES) return alert(`📸 แนบรูปได้สูงสุด ${MAX_IMAGES} รูป กรุณาลบรูปที่เกินออก`);
 
   // เตือนถ้าวันที่ห่างจากวันนี้เกิน 60 วัน
   const diffDays = Math.abs(new Date(ad.iso) - new Date()) / 86400000;
@@ -475,23 +506,38 @@ $('newsForm').addEventListener('submit', async (e) => {
     const selectedOfficers = Array.from(selectedOfficersMap.values());
     const useGeneric = $('use_generic_term').checked || selectedOfficers.length > 3;
 
+    // ข้อความผู้ร่วมคณะพร้อมตำแหน่ง รูปแบบ "ชื่อ | ตำแหน่ง ; ชื่อ | ตำแหน่ง"
+    // ตัดคนที่ซ้ำกับหัวหน้าคณะออก เพื่อไม่ให้ข่าวเขียนชื่อซ้ำ และเว้นว่างเมื่อใช้คำว่า "เจ้าหน้าที่"
+    const headName = (headData && !headData.is_all) ? headData.name : null;
+    const officersText = useGeneric ? '' :
+      selectedOfficers
+        .filter(o => o.name !== headName)
+        .map(o => o.position ? `${o.name} | ${o.position}` : o.name)
+        .join(' ; ');
+
+    // สังกัดจังหวัดส่งเฉพาะกลุ่ม สังกัดอำเภอส่งเฉพาะอำเภอ (อีกค่าเว้นว่าง)
+    const sourceType = $('source_type').value;
+    const groupVal = (sourceType === 'province') ? $('group_name').value : '';
+    const districtVal = (sourceType === 'district') ? $('district_name').value : '';
+
     const res = await fetch(WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userId,
-        date: ad.iso,                 // ค.ศ. YYYY-MM-DD (เผื่อใช้ต่อ)
-        date_thai: ad.thai,           // เช่น 13 ตุลาคม 2569 → ใช้ตัวนี้ใน Prompt ของ Gemini
+        date: ad.iso,                 // ค.ศ. YYYY-MM-DD
+        date_thai: ad.thai,           // เช่น 13 ตุลาคม 2569 → ให้ make.com ใช้แทน [[DATE]]
         device_year: new Date().getFullYear(),   // ไว้ตรวจสอบย้อนหลัง
         ua: navigator.userAgent,
         location: $('location').value,
-        source: $('source_type').value,
-        group: $('group_name').value,
-        district: $('district_name').value,
+        source: sourceType,
+        group: groupVal,
+        district: districtVal,
         kaset_action: document.querySelector('input[name="kaset_action"]:checked').value,
         kaset_name: $('kaset_name').value,
         head_officer: headData,
         officers: selectedOfficers,
+        officers_text: officersText,  // ชื่อ + ตำแหน่ง สำหรับ Prompt ของ Gemini
         use_generic_term: useGeneric,
         summary: $('summary').value,
         imageUrls: urls
